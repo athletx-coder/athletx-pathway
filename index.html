@@ -300,7 +300,16 @@
             <option>Not sure</option>
           </select>
         </div>
+        <div class="field">
+          <label class="field-label">Parent/guardian email</label>
+          <input type="email" id="p_email" placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label class="field-label">Parent/guardian phone</label>
+          <input type="text" id="p_phone" placeholder="e.g. 555-123-4567">
+        </div>
       </div>
+      <div id="introError" style="color:var(--rust-300); font-size:13px; margin-top:-6px; margin-bottom:14px;"></div>
     </div>
 
     <div class="nav-row">
@@ -410,15 +419,34 @@ function goTo(screenNum, fromReview){
   document.getElementById('screen-review').classList.add('hide');
   if(screenNum===1){
     if(!fromReview){
+      const email = document.getElementById('p_email').value.trim();
+      const errBox = document.getElementById('introError');
+      if(!email){
+        document.getElementById('screen-intro').classList.remove('hide');
+        errBox.textContent = 'Please enter a parent/guardian email so we can save this report — then click Start Assessment again.';
+        return;
+      }
+      errBox.textContent = '';
+
       profile = {
         name: document.getElementById('p_name').value.trim() || 'Athlete',
         age: document.getElementById('p_age').value.trim(),
         grade: document.getElementById('p_grade').value.trim(),
         sport: document.getElementById('p_sport').value.trim(),
         gpa: document.getElementById('p_gpa').value.trim(),
-        attendance: document.getElementById('p_attendance').value
+        attendance: document.getElementById('p_attendance').value,
+        email: email,
+        phone: document.getElementById('p_phone').value.trim()
       };
       qIndex = 0;
+
+      // Fire-and-forget lead capture — saved immediately so we still have
+      // contact info even if the assessment isn't finished.
+      fetch('/.netlify/functions/capture-lead', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(profile)
+      }).catch(()=>{ /* non-blocking; ignore network errors here */ });
     }
     document.getElementById('screen-assess').classList.remove('hide');
     renderQ();
