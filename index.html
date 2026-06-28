@@ -511,19 +511,23 @@ async function generateReport(){
     loadingLine.textContent = loadingMessages[msgIdx];
   }, 2600);
 
+  const jobId = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+
   try {
-    const resp = await fetch('/.netlify/functions/generate-report', {
+    // Kick off the background job. It returns an empty 202 almost
+    // immediately and keeps running server-side with no short timeout —
+    // the actual report comes from polling report-status.js below.
+    await fetch('/.netlify/functions/generate-report-background', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ profile, answers, questions: QUESTIONS.map(q=>({key:q.key, title:q.title, phase:q.phase})) })
+      body: JSON.stringify({ jobId, profile, answers, questions: QUESTIONS.map(q=>({key:q.key, title:q.title, phase:q.phase})) })
     });
-    if(!resp.ok){
-      const t = await resp.text();
-      throw new Error(`Server error (${resp.status}): ${t.slice(0,300)}`);
-    }
-    const data = await resp.json();
+
+    const report = await pollForResult(jobId);
     clearInterval(interval);
-    renderReport(data);
+    renderReport(report);
     document.getElementById('screen-loading').classList.add('hide');
     document.getElementById('screen-report').classList.remove('hide');
     window.scrollTo({top:0, behavior:'smooth'});
@@ -531,9 +535,26 @@ async function generateReport(){
     clearInterval(interval);
     document.getElementById('screen-loading').classList.add('hide');
     document.getElementById('screen-review').classList.remove('hide');
-    document.getElementById('errorHost').innerHTML = `<div class="error-box"><b>Couldn't generate the report.</b><br>${err.message}<br><br>If you just deployed this site, make sure the ANTHROPIC_API_KEY environment variable is set in Netlify (Site settings → Environment variables) and redeploy.</div>`;
+    document.getElementById('errorHost').innerHTML = `<div class="error-box"><b>Couldn't generate the report.</b><br>${err.message}</div>`;
     genBtn.disabled = false;
   }
+}
+
+async function pollForResult(jobId, maxWaitMs = 120000, intervalMs = 3000){
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs){
+    await new Promise(r => setTimeout(r, intervalMs));
+    let json;
+    try {
+      const resp = await fetch(`/.netlify/functions/report-status?jobId=${encodeURIComponent(jobId)}`);
+      if (!resp.ok) continue;
+      json = await resp.json();
+    } catch (e) { continue; }
+    if (json.status === 'complete') return json.report;
+    if (json.status === 'error') throw new Error(json.error || 'Report generation failed.');
+    // status === 'pending' -> keep polling
+  }
+  throw new Error('This is taking longer than expected. Please wait a moment and try again.');
 }
 
 function dialSVG(pct, color){
