@@ -32,8 +32,6 @@ exports.handler = async function (event) {
 
   const { profile = {}, answers = {}, questions = [] } = payload;
 
-  // Re-attach question text to each answer so the model has full context,
-  // not just keys.
   const answeredQA = questions.map(q => ({
     phase: q.phase,
     question: q.title,
@@ -52,8 +50,8 @@ exports.handler = async function (event) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4000,
         system: [
           {
             type: 'text',
@@ -107,6 +105,7 @@ Rules:
 - Ground career, income, and outlook claims in realistic, generally-accepted labor market knowledge. If you are not certain of a precise figure, give a reasonable, clearly-rounded range rather than a falsely precise number.
 - Be specific to the individual student's actual answers. Do not produce generic filler — reference their stated sport, goals, and behaviors directly in the gap analysis, risks, and roadmap.
 - Tone: direct, warm, respectful of the student's intelligence. No corporate filler language.
+- Keep every text field tight: 1 sentence where the schema says 1 sentence, 2-3 sentences max where it says 2-3. Do not pad. Brevity is required, not optional.
 
 You must respond with ONLY valid JSON matching this exact schema (no markdown fences, no commentary before or after):
 
