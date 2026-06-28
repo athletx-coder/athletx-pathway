@@ -13,6 +13,7 @@
 // Netlify (Site settings -> Environment variables) before deploying.
 
 const { getStore } = require('@netlify/blobs');
+const nodemailer = require('nodemailer');
 
 exports.handler = async function (event) {
   let payload;
@@ -90,10 +91,98 @@ exports.handler = async function (event) {
     }
 
     await store.setJSON(jobId, { status: 'complete', report: parsed });
+
+    // Email delivery is best-effort: the result is already saved above,
+    // so a failure here doesn't lose the report, it just means email
+    // didn't go out. Note the failure on the stored record either way.
+    try {
+      await sendEmails(profile, parsed);
+    } catch (emailErr) {
+      await store.setJSON(jobId, { status: 'complete', report: parsed, emailError: emailErr.message });
+    }
   } catch (err) {
     await store.setJSON(jobId, { status: 'error', error: err.message });
   }
 };
+
+async function sendEmails(profile, report) {
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  if (!gmailUser || !gmailPass) {
+    throw new Error('GMAIL_USER or GMAIL_APP_PASSWORD is not configured in Netlify environment variables.');
+  }
+
+  const notifyEmail = process.env.ATHLETX_NOTIFY_EMAIL || gmailUser;
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: gmailUser, pass: gmailPass }
+  });
+
+  // Email 1: to the parent/guardian, the actual report.
+  await transporter.sendMail({
+    from: `"AthletX Future Pathway" <${gmailUser}>`,
+    to: profile.email,
+    subject: `${profile.name || 'Your athlete'}'s Future Pathway Report is ready`,
+    html: buildEmailHtml(profile, report, false)
+  });
+
+  // Email 2: to AthletX, same report plus the lead's contact info, so every
+  // completed assessment also lands as a notification for follow-up.
+  await transporter.sendMail({
+    from: `"AthletX Future Pathway" <${gmailUser}>`,
+    to: notifyEmail,
+    subject: `New report completed: ${profile.name || 'Unnamed'}${profile.sport ? ' (' + profile.sport + ')' : ''}`,
+    html: buildEmailHtml(profile, report, true)
+  });
+}
+
+function buildEmailHtml(profile, report, includeContact) {
+  const esc = (s) => String(s === undefined || s === null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const contactBlock = includeContact ? `
+    <div style="background:#fef3cd;border:1px solid #f0a202;border-radius:8px;padding:14px 16px;margin-bottom:20px;font-size:14px;">
+      <strong>Lead contact info</strong><br>
+      Name: ${esc(profile.name)}<br>
+      Email: ${esc(profile.email)}<br>
+      Phone: ${esc(profile.phone)}<br>
+      Age: ${esc(profile.age)} &nbsp; Grade: ${esc(profile.grade)} &nbsp; Sport: ${esc(profile.sport)}
+    </div>` : '';
+
+  const careers = (report.topCareers || []).slice(0, 5).map(c =>
+    `<li style="margin-bottom:8px;"><strong>${esc(c.career)}</strong>${c.matchPct ? ' (' + esc(c.matchPct) + '% match)' : ''} — ${esc(c.why)}</li>`
+  ).join('');
+
+  const actions = (report.nextFiveActions || []).map(a =>
+    `<li style="margin-bottom:8px;"><strong>${esc(a.action)}</strong> — ${esc(a.why)} <em>(${esc(a.timeframe)})</em></li>`
+  ).join('');
+
+  const snapshot = report.snapshot || {};
+  const score = report.actionAspirationScore || {};
+
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1a1a1a;line-height:1.5;">
+    ${contactBlock}
+    <h2 style="color:#0b1f33;margin-bottom:4px;">${esc(profile.name)}'s Future Pathway Report</h2>
+    <p style="font-size:15px;color:#444;">${esc(snapshot.headline)}</p>
+
+    <h3 style="color:#c97f00;border-bottom:2px solid #f0a202;padding-bottom:4px;">Snapshot</h3>
+    <p><strong>Current trajectory:</strong> ${esc(snapshot.currentTrajectory)}</p>
+    <p><strong>If nothing changes:</strong> ${esc(snapshot.futureTrajectory)}</p>
+
+    <h3 style="color:#c97f00;border-bottom:2px solid #f0a202;padding-bottom:4px;">Action vs. Aspiration Score: ${esc(score.score)}/100</h3>
+    <p>${esc(score.explanation)}</p>
+
+    <h3 style="color:#c97f00;border-bottom:2px solid #f0a202;padding-bottom:4px;">Top Career Matches</h3>
+    <ul>${careers}</ul>
+
+    <h3 style="color:#c97f00;border-bottom:2px solid #f0a202;padding-bottom:4px;">Next 5 Actions — Start This Week</h3>
+    <ol>${actions}</ol>
+
+    <p style="margin-top:24px;font-size:12px;color:#888;">Built by AthletX™ — part of the AthletX sports intelligence ecosystem.</p>
+  </div>`;
+}
 
 function buildSystemPrompt() {
   return `You are the AI engine behind ATHLETE FUTURE PATHWAY (TM), part of the AthletX sports intelligence ecosystem.
