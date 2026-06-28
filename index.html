@@ -349,6 +349,16 @@
     </div>
   </div>
 
+  <!-- ============ SUBMITTED CONFIRMATION ============ -->
+  <div id="screen-submitted" class="hide">
+    <div class="loading-wrap">
+      <div style="font-size:54px; margin-bottom:18px;">✅</div>
+      <h2 class="section-title" style="margin-bottom:10px;">You're all set!</h2>
+      <p class="lede" id="submittedMsg" style="margin:0 auto 8px; max-width:480px;"></p>
+      <p class="loading-line">Check your inbox in the next few minutes (and your spam folder, just in case).</p>
+    </div>
+  </div>
+
   <!-- ============ REPORT ============ -->
   <div id="screen-report" class="hide"></div>
 
@@ -531,58 +541,35 @@ async function generateReport(){
   document.getElementById('errorHost').innerHTML = '';
   document.getElementById('screen-review').classList.add('hide');
   document.getElementById('screen-loading').classList.remove('hide');
-
-  let msgIdx = 0;
-  const loadingLine = document.getElementById('loadingLine');
-  const interval = setInterval(()=>{
-    msgIdx = (msgIdx+1) % loadingMessages.length;
-    loadingLine.textContent = loadingMessages[msgIdx];
-  }, 2600);
+  document.getElementById('loadingLine').textContent = 'Submitting your assessment…';
 
   const jobId = (window.crypto && window.crypto.randomUUID)
     ? window.crypto.randomUUID()
     : 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 
   try {
-    // Kick off the background job. It returns an empty 202 almost
-    // immediately and keeps running server-side with no short timeout —
-    // the actual report comes from polling report-status.js below.
-    await fetch('/.netlify/functions/generate-report-background', {
+    // Kick off the background job and move on immediately — the report
+    // is generated and emailed server-side, no on-screen waiting needed.
+    const resp = await fetch('/.netlify/functions/generate-report-background', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ jobId, profile, answers, questions: QUESTIONS.map(q=>({key:q.key, title:q.title, phase:q.phase})) })
     });
+    if (resp.status >= 400) {
+      throw new Error(`Server error (${resp.status}). Please try again.`);
+    }
 
-    const report = await pollForResult(jobId);
-    clearInterval(interval);
-    renderReport(report);
     document.getElementById('screen-loading').classList.add('hide');
-    document.getElementById('screen-report').classList.remove('hide');
+    document.getElementById('submittedMsg').textContent =
+      `Your personalized Athlete Future Pathway report is being generated now and will be emailed to ${profile.email || 'your email'} shortly.`;
+    document.getElementById('screen-submitted').classList.remove('hide');
     window.scrollTo({top:0, behavior:'smooth'});
   } catch(err){
-    clearInterval(interval);
     document.getElementById('screen-loading').classList.add('hide');
     document.getElementById('screen-review').classList.remove('hide');
-    document.getElementById('errorHost').innerHTML = `<div class="error-box"><b>Couldn't generate the report.</b><br>${err.message}</div>`;
+    document.getElementById('errorHost').innerHTML = `<div class="error-box"><b>Couldn't submit the assessment.</b><br>${err.message}</div>`;
     genBtn.disabled = false;
   }
-}
-
-async function pollForResult(jobId, maxWaitMs = 120000, intervalMs = 3000){
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs){
-    await new Promise(r => setTimeout(r, intervalMs));
-    let json;
-    try {
-      const resp = await fetch(`/.netlify/functions/report-status?jobId=${encodeURIComponent(jobId)}`);
-      if (!resp.ok) continue;
-      json = await resp.json();
-    } catch (e) { continue; }
-    if (json.status === 'complete') return json.report;
-    if (json.status === 'error') throw new Error(json.error || 'Report generation failed.');
-    // status === 'pending' -> keep polling
-  }
-  throw new Error('This is taking longer than expected. Please wait a moment and try again.');
 }
 
 function dialSVG(pct, color){
