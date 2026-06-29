@@ -26,7 +26,11 @@ exports.handler = async function (event) {
   const { jobId, profile = {}, answers = {}, questions = [] } = payload;
   if (!jobId) return;
 
-  const store = getStore('athletx-reports');
+  const store = getStore({
+  name: 'athletx-reports',
+  siteID: process.env.NETLIFY_SITE_ID,
+  token: process.env.NETLIFY_BLOBS_TOKEN
+});
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
