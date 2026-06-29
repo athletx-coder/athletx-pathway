@@ -25,7 +25,11 @@ exports.handler = async function (event) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing email' }) };
   }
 
-  const store = getStore('athletx-leads');
+  const store = getStore({
+  name: 'athletx-leads',
+  siteID: process.env.NETLIFY_SITE_ID,
+  token: process.env.NETLIFY_BLOBS_TOKEN
+});
   const key = `${Date.now()}-${profile.email}`;
 
   try {
